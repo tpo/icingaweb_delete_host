@@ -1,0 +1,54 @@
+#!/bin/bash
+#
+# written by Tomas Pospisek <tpo_deb@sourcepole.ch>
+# and put into the public domain.
+#
+# This script lives under https://github.com/tpo/icingaweb_delete_host
+
+help() {
+   echo 'usage: icingaweb_delete_host hostname'
+   echo
+   echo '  This script will attempt to remove all entries of the given'
+   echo '  host from icingaweb(1+2).'
+   echo
+   echo '  You need to run this script with sufficient permissions!'
+   echo "  (i.e. usually as the 'postgres' user)"
+   echo
+   echo '  ATTENTION: PLEASE READ THE SOURCE CODE OF THE SCRIPT AND'
+   echo '             ENSURE, THAT IT WILL NOT EAT YOUR SERVER.'
+   echo '             This script has been tested under icinga2'
+   echo '             V2.4.7-1~ppa1~trusty1.'
+   exit 1
+}
+
+[ ! "$1" -o "$1" == "--help" ] && help
+
+host="$1"
+
+service_ids=$(
+  echo "select service_object_id from icinga_services where host_object_id = (select host_object_id from icinga_hosts where display_name = '$host')" \
+  | psql -R "," -t -A icinga \
+)
+
+select="select * from"
+delete="delete from"
+
+# use following line for debugging instead:
+# command="$select"
+command="$delete"
+
+(
+  cat <<- EOSQL
+  $command  icinga_acknowledgements            where  object_id          in  ($service_ids);
+  $command  icinga_logentries                  where  object_id          in  ($service_ids);
+  $command  icinga_notifications               where  object_id          in  ($service_ids);
+  $command  icinga_objects                     where  object_id          in  ($service_ids);
+  $command  icinga_services                    where  service_object_id  in  ($service_ids);
+  $command  public.icinga_servicestatus        where  service_object_id  in  ($service_ids);
+  $command  public.icinga_statehistory         where  object_id          in  ($service_ids);
+  $command  public.icinga_servicechecks        where  service_object_id  in  ($service_ids);
+  $command  public.icinga_servicedependencies  where  service_object_id  in  ($service_ids);
+  $command  public.icinga_serviceescalations   where  service_object_id  in  ($service_ids);
+  $command  icinga_hosts                       where  display_name = '$host'
+EOSQL
+) | psql icinga
